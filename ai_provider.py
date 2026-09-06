@@ -1,44 +1,92 @@
 from pathlib import Path
 from typing import Optional
-import os
+
+from config import settings
 
 
 class AIProvider:
     """
-    Story2Video AI Model Provider
+    Story2Video AI Provider
 
-    এই Provider-এর কাজ হলো:
-    AIEngine এবং ভবিষ্যতের GPU Video Model-এর
-    মধ্যে connection তৈরি করা।
+    এই class বিভিন্ন AI Video Provider-এর
+    configuration এবং connection পরিচালনা করে।
+
+    বর্তমানে supported architecture:
+
+    - local
+    - huggingface
+    - gpu_server
+
+    ভবিষ্যতে নতুন provider সহজে যোগ করা যাবে।
     """
 
     def __init__(self):
-        self.provider_name = "Story2Video GPU Provider"
 
-        # ভবিষ্যতে GPU Server URL এখানে থাকবে
-        self.gpu_server_url = os.getenv(
-            "GPU_SERVER_URL",
-            ""
+        self.provider_name = settings.AI_PROVIDER
+
+        self.gpu_server_url = (
+            settings.GPU_SERVER_URL
         )
 
-        self.api_key = os.getenv(
-            "GPU_SERVER_API_KEY",
-            ""
+        self.gpu_api_key = (
+            settings.GPU_SERVER_API_KEY
         )
+
+        self.huggingface_api_key = (
+            settings.HUGGINGFACE_API_KEY
+        )
+
+    # -----------------------------------------
+    # CONNECTION CHECK
+    # -----------------------------------------
 
     def is_connected(self) -> bool:
 
-        return bool(self.gpu_server_url)
+        if self.provider_name == "local":
+            return False
+
+        if self.provider_name == "gpu_server":
+
+            return bool(
+                self.gpu_server_url
+            )
+
+        if self.provider_name == "huggingface":
+
+            return bool(
+                self.huggingface_api_key
+            )
+
+        return False
+
+    # -----------------------------------------
+    # PROVIDER STATUS
+    # -----------------------------------------
 
     def status(self) -> dict:
 
         return {
             "provider": self.provider_name,
             "connected": self.is_connected(),
+
             "gpu_server_configured": bool(
                 self.gpu_server_url
-            )
+            ),
+
+            "huggingface_configured": bool(
+                self.huggingface_api_key
+            ),
+
+            "available_providers": [
+                "local",
+                "huggingface",
+                "gpu_server"
+            ]
         }
+
+    # -----------------------------------------
+    # VIDEO GENERATION
+    # -----------------------------------------
 
     def generate_video(
         self,
@@ -55,27 +103,30 @@ class AIProvider:
                 "Input image was not found."
             )
 
-        # =================================================
-        # GPU MODEL CONNECTION
-        # =================================================
-        #
-        # পরের ধাপে এখানে আমাদের GPU Server API call হবে।
-        #
-        # GPU Server image গ্রহণ করবে
-        # → AI model চালাবে
-        # → video তৈরি করবে
-        # → video URL/File ফেরত দেবে
-        #
-        # =================================================
-
-        if not self.is_connected():
+        if self.provider_name == "local":
 
             raise RuntimeError(
-                "GPU AI Server is not connected yet. "
-                "Configure GPU_SERVER_URL first."
+                "No AI provider is connected yet."
+            )
+
+        if self.provider_name == "huggingface":
+
+            raise RuntimeError(
+                "Hugging Face provider connector "
+                "is not implemented yet."
+            )
+
+        if self.provider_name == "gpu_server":
+
+            raise RuntimeError(
+                "GPU server connector "
+                "is not implemented yet."
             )
 
         raise RuntimeError(
-            "GPU Provider is configured but the "
-            "video model connector is not implemented yet."
+            f"Unknown AI provider: "
+            f"{self.provider_name}"
         )
+
+
+ai_provider = AIProvider()
