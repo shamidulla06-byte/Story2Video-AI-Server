@@ -5,11 +5,12 @@ from uuid import uuid4
 import shutil
 
 from ai_engine import AIEngine
+from job_manager import job_manager
 
 
 app = FastAPI(
     title="Story2Video AI Server",
-    version="1.1.0"
+    version="2.0.0"
 )
 
 
@@ -53,8 +54,7 @@ def root():
     return {
         "service": "Story2Video AI Server",
         "status": "online",
-        "version": "1.1.0",
-        "ai_engine": ai_engine.status()
+        "version": "2.0.0"
     }
 
 
@@ -80,6 +80,24 @@ def engine_status():
 
 
 # =====================================================
+# GET JOB STATUS
+# =====================================================
+
+@app.get("/v1/jobs/{job_id}")
+def get_job(job_id: str):
+
+    job = job_manager.get_job(job_id)
+
+    if job is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Job not found."
+        )
+
+    return job
+
+
+# =====================================================
 # IMAGE → VIDEO
 # =====================================================
 
@@ -91,7 +109,7 @@ async def image_to_video(
     duration: int = Form(10)
 ):
 
-    # Validate image type
+    # Validate image
 
     if image.content_type not in ALLOWED_IMAGE_TYPES:
         raise HTTPException(
@@ -99,19 +117,24 @@ async def image_to_video(
             detail="Only JPEG, PNG and WebP images are supported."
         )
 
-    # Validate duration
-
     if duration != 10:
         raise HTTPException(
             status_code=400,
             detail="Currently only 10-second videos are supported."
         )
 
-    # Create Job ID
+    # Create job
 
     job_id = str(uuid4())
 
-    # File extension
+    job_manager.create_job(
+        job_id=job_id,
+        prompt=prompt,
+        mode=mode,
+        duration=duration
+    )
+
+    # Determine extension
 
     extension = ".jpg"
 
@@ -122,7 +145,7 @@ async def image_to_video(
         extension = ".webp"
 
 
-    # Save uploaded image
+    # Save image
 
     input_file = UPLOAD_DIR / f"{job_id}{extension}"
 
@@ -136,60 +159,28 @@ async def image_to_video(
 
     except Exception as error:
 
+        job_manager.update_status(
+            job_id,
+            "failed",
+            error=str(error)
+        )
+
         raise HTTPException(
             status_code=500,
             detail=f"Could not save image: {error}"
         )
 
 
-    # Output video path
+    # এখন Job Queue-তে আছে
 
-    output_file = OUTPUT_DIR / f"{job_id}.mp4"
-
-
-    # =================================================
-    # CALL OUR AI ENGINE
-    # =================================================
-
-    try:
-
-        result = ai_engine.generate(
-            image_path=input_file,
-            output_path=output_file,
-            prompt=prompt,
-            mode=mode,
-            duration=duration
-        )
-
-        return JSONResponse(
-            content={
-                "success": True,
-                "job_id": job_id,
-                "status": "completed",
-                "video_file": str(result),
-                "message": "Video generated successfully."
-            }
-        )
-
-    except RuntimeError as error:
-
-        # AI Model এখনও connected না থাকলে
-        # Server crash করবে না
-
-        return JSONResponse(
-            status_code=503,
-            content={
-                "success": False,
-                "job_id": job_id,
-                "status": "engine_not_connected",
-                "message": str(error),
-                "engine_status": ai_engine.status()
-            }
-        )
-
-    except Exception as error:
-
-        raise HTTPException(
-            status_code=500,
-            detail=f"Video generation failed: {error}"
-        )
+    return JSONResponse(
+        content={
+            "success": True,
+            "job_id": job_id,
+            "status": "queued",
+            "message": (
+                "Your video job has been added "
+                "to the Story2Video queue."
+            )
+        }
+    )
