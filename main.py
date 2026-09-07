@@ -6,11 +6,12 @@ import shutil
 
 from ai_engine import AIEngine
 from job_manager import job_manager
+from story_intelligence import story_intelligence
 
 
 app = FastAPI(
     title="Story2Video AI Server",
-    version="2.0.0"
+    version="2.1.0"
 )
 
 
@@ -54,7 +55,7 @@ def root():
     return {
         "service": "Story2Video AI Server",
         "status": "online",
-        "version": "2.0.0"
+        "version": "2.1.0"
     }
 
 
@@ -66,7 +67,12 @@ def root():
 def health():
     return {
         "status": "healthy",
-        "ai_engine": ai_engine.status()
+        "ai_engine": ai_engine.status(),
+        "story_intelligence": {
+            "engine": story_intelligence.engine_name,
+            "version": story_intelligence.version,
+            "status": "ready"
+        }
     }
 
 
@@ -80,6 +86,32 @@ def engine_status():
 
 
 # =====================================================
+# STORY INTELLIGENCE
+# =====================================================
+
+@app.post("/v1/story/analyze")
+def analyze_story(
+    story: str = Form(...)
+):
+
+    try:
+
+        result = story_intelligence.analyze_story(story)
+
+        return {
+            "success": True,
+            "analysis": result
+        }
+
+    except ValueError as error:
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(error)
+        )
+
+
+# =====================================================
 # GET JOB STATUS
 # =====================================================
 
@@ -89,6 +121,7 @@ def get_job(job_id: str):
     job = job_manager.get_job(job_id)
 
     if job is None:
+
         raise HTTPException(
             status_code=404,
             detail="Job not found."
@@ -111,27 +144,15 @@ def process_video_job(
 
     try:
 
-        # ---------------------------------------------
-        # JOB IS NOW PROCESSING
-        # ---------------------------------------------
-
         job_manager.update_status(
             job_id,
             "processing"
         )
 
-        # ---------------------------------------------
-        # OUTPUT VIDEO PATH
-        # ---------------------------------------------
-
         output_file = (
             OUTPUT_DIR /
             f"{job_id}.mp4"
         )
-
-        # ---------------------------------------------
-        # SEND JOB TO AI ENGINE
-        # ---------------------------------------------
 
         result = ai_engine.generate(
             image_path=input_file,
@@ -141,23 +162,14 @@ def process_video_job(
             duration=duration
         )
 
-        # ---------------------------------------------
-        # CHECK RESULT
-        # ---------------------------------------------
-
         if result is None:
 
             raise RuntimeError(
                 "AI provider did not return a video."
             )
 
-        # ---------------------------------------------
-        # JOB COMPLETED
-        # ---------------------------------------------
-
         video_url = (
-            f"/storage/outputs/"
-            f"{job_id}.mp4"
+            f"/storage/outputs/{job_id}.mp4"
         )
 
         job_manager.update_status(
@@ -166,12 +178,7 @@ def process_video_job(
             video_url=video_url
         )
 
-
     except Exception as error:
-
-        # ---------------------------------------------
-        # JOB FAILED
-        # ---------------------------------------------
 
         job_manager.update_status(
             job_id,
@@ -193,10 +200,6 @@ async def image_to_video(
     duration: int = Form(10)
 ):
 
-    # ---------------------------------------------
-    # VALIDATE IMAGE
-    # ---------------------------------------------
-
     if image.content_type not in ALLOWED_IMAGE_TYPES:
 
         raise HTTPException(
@@ -206,10 +209,6 @@ async def image_to_video(
                 "are supported."
             )
         )
-
-    # ---------------------------------------------
-    # VALIDATE DURATION
-    # ---------------------------------------------
 
     if duration != 10:
 
@@ -221,15 +220,7 @@ async def image_to_video(
             )
         )
 
-    # ---------------------------------------------
-    # CREATE JOB ID
-    # ---------------------------------------------
-
     job_id = str(uuid4())
-
-    # ---------------------------------------------
-    # CREATE JOB
-    # ---------------------------------------------
 
     job_manager.create_job(
         job_id=job_id,
@@ -237,10 +228,6 @@ async def image_to_video(
         mode=mode,
         duration=duration
     )
-
-    # ---------------------------------------------
-    # DETERMINE IMAGE EXTENSION
-    # ---------------------------------------------
 
     extension = ".jpg"
 
@@ -251,10 +238,6 @@ async def image_to_video(
     elif image.content_type == "image/webp":
 
         extension = ".webp"
-
-    # ---------------------------------------------
-    # SAVE IMAGE
-    # ---------------------------------------------
 
     input_file = (
         UPLOAD_DIR /
@@ -280,14 +263,8 @@ async def image_to_video(
 
         raise HTTPException(
             status_code=500,
-            detail=(
-                f"Could not save image: {error}"
-            )
+            detail=f"Could not save image: {error}"
         )
-
-    # ---------------------------------------------
-    # ADD JOB TO BACKGROUND PROCESSING
-    # ---------------------------------------------
 
     background_tasks.add_task(
         process_video_job,
@@ -298,10 +275,6 @@ async def image_to_video(
         duration
     )
 
-    # ---------------------------------------------
-    # RETURN JOB INFORMATION
-    # ---------------------------------------------
-
     return JSONResponse(
         content={
             "success": True,
@@ -311,8 +284,6 @@ async def image_to_video(
                 "Your video job has been added "
                 "to the Story2Video queue."
             ),
-            "status_url": (
-                f"/v1/jobs/{job_id}"
-            )
+            "status_url": f"/v1/jobs/{job_id}"
         }
     )
