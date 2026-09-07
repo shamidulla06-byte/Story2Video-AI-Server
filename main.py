@@ -8,11 +8,12 @@ from ai_engine import AIEngine
 from job_manager import job_manager
 from story_intelligence import story_intelligence
 from scene_planner import scene_planner
+from continuity_engine import continuity_engine
 
 
 app = FastAPI(
     title="Story2Video AI Server",
-    version="2.2.0"
+    version="2.3.0"
 )
 
 
@@ -56,7 +57,7 @@ def root():
     return {
         "service": "Story2Video AI Server",
         "status": "online",
-        "version": "2.2.0"
+        "version": "2.3.0"
     }
 
 
@@ -80,6 +81,12 @@ def health():
         "scene_planner": {
             "engine": scene_planner.engine_name,
             "version": scene_planner.version,
+            "status": "ready"
+        },
+
+        "continuity_engine": {
+            "engine": continuity_engine.engine_name,
+            "version": continuity_engine.version,
             "status": "ready"
         }
     }
@@ -133,19 +140,11 @@ def plan_story(
 
     try:
 
-        # ---------------------------------------------
-        # STEP 1: UNDERSTAND THE STORY
-        # ---------------------------------------------
-
         story_analysis = (
             story_intelligence.analyze_story(
                 story
             )
         )
-
-        # ---------------------------------------------
-        # STEP 2: CREATE SCENE PLAN
-        # ---------------------------------------------
 
         scene_plan = (
             scene_planner.create_scene_plan(
@@ -157,6 +156,60 @@ def plan_story(
             "success": True,
             "story_analysis": story_analysis,
             "scene_plan": scene_plan
+        }
+
+    except ValueError as error:
+
+        raise HTTPException(
+            status_code=400,
+            detail=str(error)
+        )
+
+
+# =====================================================
+# STORY → FULL CONTINUITY PLAN
+# =====================================================
+
+@app.post("/v1/story/full-plan")
+def create_full_story_plan(
+    story: str = Form(...)
+):
+
+    try:
+
+        # STEP 1: UNDERSTAND STORY
+
+        story_analysis = (
+            story_intelligence.analyze_story(
+                story
+            )
+        )
+
+        # STEP 2: CREATE SCENE PLAN
+
+        scene_plan = (
+            scene_planner.create_scene_plan(
+                story_analysis
+            )
+        )
+
+        # STEP 3: BUILD CONTINUITY MEMORY
+
+        continuity_plan = (
+            continuity_engine.build_continuity(
+                story_analysis,
+                scene_plan
+            )
+        )
+
+        return {
+            "success": True,
+
+            "story_analysis": story_analysis,
+
+            "scene_plan": scene_plan,
+
+            "continuity_plan": continuity_plan
         }
 
     except ValueError as error:
@@ -256,9 +309,7 @@ async def image_to_video(
     duration: int = Form(10)
 ):
 
-    # ---------------------------------------------
     # VALIDATE IMAGE
-    # ---------------------------------------------
 
     if image.content_type not in ALLOWED_IMAGE_TYPES:
 
@@ -270,9 +321,7 @@ async def image_to_video(
             )
         )
 
-    # ---------------------------------------------
     # VALIDATE DURATION
-    # ---------------------------------------------
 
     if duration != 10:
 
@@ -284,9 +333,7 @@ async def image_to_video(
             )
         )
 
-    # ---------------------------------------------
     # CREATE JOB
-    # ---------------------------------------------
 
     job_id = str(uuid4())
 
@@ -297,9 +344,7 @@ async def image_to_video(
         duration=duration
     )
 
-    # ---------------------------------------------
-    # IMAGE EXTENSION
-    # ---------------------------------------------
+    # DETERMINE IMAGE EXTENSION
 
     extension = ".jpg"
 
@@ -311,9 +356,7 @@ async def image_to_video(
 
         extension = ".webp"
 
-    # ---------------------------------------------
     # SAVE IMAGE
-    # ---------------------------------------------
 
     input_file = (
         UPLOAD_DIR /
@@ -342,9 +385,7 @@ async def image_to_video(
             detail=f"Could not save image: {error}"
         )
 
-    # ---------------------------------------------
     # ADD BACKGROUND JOB
-    # ---------------------------------------------
 
     background_tasks.add_task(
         process_video_job,
@@ -355,14 +396,14 @@ async def image_to_video(
         duration
     )
 
-    # ---------------------------------------------
-    # RETURN RESPONSE
-    # ---------------------------------------------
+    # RETURN JOB INFORMATION
 
     return JSONResponse(
         content={
             "success": True,
+
             "job_id": job_id,
+
             "status": "queued",
 
             "message": (
@@ -374,4 +415,4 @@ async def image_to_video(
                 f"/v1/jobs/{job_id}"
             )
         }
-    )
+        )
