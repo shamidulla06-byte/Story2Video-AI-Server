@@ -1,4 +1,4 @@
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 from pathlib import Path
 from uuid import uuid4
@@ -98,34 +98,138 @@ def get_job(job_id: str):
 
 
 # =====================================================
+# BACKGROUND VIDEO PROCESSING
+# =====================================================
+
+def process_video_job(
+    job_id: str,
+    input_file: Path,
+    prompt: str,
+    mode: str,
+    duration: int
+):
+
+    try:
+
+        # ---------------------------------------------
+        # JOB IS NOW PROCESSING
+        # ---------------------------------------------
+
+        job_manager.update_status(
+            job_id,
+            "processing"
+        )
+
+        # ---------------------------------------------
+        # OUTPUT VIDEO PATH
+        # ---------------------------------------------
+
+        output_file = (
+            OUTPUT_DIR /
+            f"{job_id}.mp4"
+        )
+
+        # ---------------------------------------------
+        # SEND JOB TO AI ENGINE
+        # ---------------------------------------------
+
+        result = ai_engine.generate(
+            image_path=input_file,
+            output_path=output_file,
+            prompt=prompt,
+            mode=mode,
+            duration=duration
+        )
+
+        # ---------------------------------------------
+        # CHECK RESULT
+        # ---------------------------------------------
+
+        if result is None:
+
+            raise RuntimeError(
+                "AI provider did not return a video."
+            )
+
+        # ---------------------------------------------
+        # JOB COMPLETED
+        # ---------------------------------------------
+
+        video_url = (
+            f"/storage/outputs/"
+            f"{job_id}.mp4"
+        )
+
+        job_manager.update_status(
+            job_id,
+            "completed",
+            video_url=video_url
+        )
+
+
+    except Exception as error:
+
+        # ---------------------------------------------
+        # JOB FAILED
+        # ---------------------------------------------
+
+        job_manager.update_status(
+            job_id,
+            "failed",
+            error=str(error)
+        )
+
+
+# =====================================================
 # IMAGE → VIDEO
 # =====================================================
 
 @app.post("/v1/image-to-video")
 async def image_to_video(
+    background_tasks: BackgroundTasks,
     image: UploadFile = File(...),
     prompt: str = Form(""),
     mode: str = Form("AI Motion"),
     duration: int = Form(10)
 ):
 
-    # Validate image
+    # ---------------------------------------------
+    # VALIDATE IMAGE
+    # ---------------------------------------------
 
     if image.content_type not in ALLOWED_IMAGE_TYPES:
+
         raise HTTPException(
             status_code=400,
-            detail="Only JPEG, PNG and WebP images are supported."
+            detail=(
+                "Only JPEG, PNG and WebP images "
+                "are supported."
+            )
         )
+
+    # ---------------------------------------------
+    # VALIDATE DURATION
+    # ---------------------------------------------
 
     if duration != 10:
+
         raise HTTPException(
             status_code=400,
-            detail="Currently only 10-second videos are supported."
+            detail=(
+                "Currently only 10-second videos "
+                "are supported."
+            )
         )
 
-    # Create job
+    # ---------------------------------------------
+    # CREATE JOB ID
+    # ---------------------------------------------
 
     job_id = str(uuid4())
+
+    # ---------------------------------------------
+    # CREATE JOB
+    # ---------------------------------------------
 
     job_manager.create_job(
         job_id=job_id,
@@ -134,24 +238,33 @@ async def image_to_video(
         duration=duration
     )
 
-    # Determine extension
+    # ---------------------------------------------
+    # DETERMINE IMAGE EXTENSION
+    # ---------------------------------------------
 
     extension = ".jpg"
 
     if image.content_type == "image/png":
+
         extension = ".png"
 
     elif image.content_type == "image/webp":
+
         extension = ".webp"
 
+    # ---------------------------------------------
+    # SAVE IMAGE
+    # ---------------------------------------------
 
-    # Save image
-
-    input_file = UPLOAD_DIR / f"{job_id}{extension}"
+    input_file = (
+        UPLOAD_DIR /
+        f"{job_id}{extension}"
+    )
 
     try:
 
         with input_file.open("wb") as buffer:
+
             shutil.copyfileobj(
                 image.file,
                 buffer
@@ -167,11 +280,27 @@ async def image_to_video(
 
         raise HTTPException(
             status_code=500,
-            detail=f"Could not save image: {error}"
+            detail=(
+                f"Could not save image: {error}"
+            )
         )
 
+    # ---------------------------------------------
+    # ADD JOB TO BACKGROUND PROCESSING
+    # ---------------------------------------------
 
-    # এখন Job Queue-তে আছে
+    background_tasks.add_task(
+        process_video_job,
+        job_id,
+        input_file,
+        prompt,
+        mode,
+        duration
+    )
+
+    # ---------------------------------------------
+    # RETURN JOB INFORMATION
+    # ---------------------------------------------
 
     return JSONResponse(
         content={
@@ -181,6 +310,9 @@ async def image_to_video(
             "message": (
                 "Your video job has been added "
                 "to the Story2Video queue."
+            ),
+            "status_url": (
+                f"/v1/jobs/{job_id}"
             )
         }
     )
