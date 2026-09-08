@@ -6,39 +6,80 @@ from ai_provider import AIProvider
 
 class AIEngine:
 
+    # =====================================================
+    # INITIALIZE
+    # =====================================================
+
     def __init__(self):
 
         self.name = "Story2Video AI Engine"
 
-        self.version = "2.0.0"
+        self.version = "2.4.0"
 
         self.provider = AIProvider()
+
+
+    # =====================================================
+    # STATUS
+    # =====================================================
 
     def status(self) -> dict:
 
         provider_status = self.provider.status()
 
         return {
+
             "engine": self.name,
+
             "version": self.version,
+
             "connected": provider_status["connected"],
-            "duration": 10,
-            "supported_modes": [
-                "AI Motion",
-                "Face Motion",
-                "Cinematic Motion"
+
+            "supported_durations": [
+                6,
+                10
             ],
+
+            "default_duration": 6,
+
+            "supported_modes": [
+
+                "AI Motion",
+
+                "Face Motion",
+
+                "Cinematic Motion"
+
+            ],
+
             "provider": provider_status
         }
 
+
+    # =====================================================
+    # GENERATE VIDEO
+    # =====================================================
+
     def generate(
+
         self,
+
         image_path: Path,
+
         output_path: Path,
+
         prompt: str = "",
+
         mode: str = "AI Motion",
-        duration: int = 10
+
+        duration: int = 6
+
     ) -> Optional[Path]:
+
+
+        # =================================================
+        # CHECK INPUT IMAGE
+        # =================================================
 
         if not image_path.exists():
 
@@ -46,18 +87,41 @@ class AIEngine:
                 "Input image was not found."
             )
 
-        if duration != 10:
+
+        # =================================================
+        # CHECK DURATION
+        # =================================================
+
+        supported_durations = {
+
+            6,
+            10
+        }
+
+
+        if duration not in supported_durations:
 
             raise ValueError(
-                "Currently only 10-second videos "
-                "are supported."
+
+                "Supported video durations are "
+                "6 or 10 seconds."
             )
 
+
+        # =================================================
+        # CHECK MODE
+        # =================================================
+
         allowed_modes = {
+
             "AI Motion",
+
             "Face Motion",
+
             "Cinematic Motion"
+
         }
+
 
         if mode not in allowed_modes:
 
@@ -65,14 +129,60 @@ class AIEngine:
                 f"Unsupported animation mode: {mode}"
             )
 
+
         # =================================================
-        # SEND TO OUR AI PROVIDER
+        # CREATE OUTPUT DIRECTORY
         # =================================================
 
-        return self.provider.generate_video(
+        output_path.parent.mkdir(
+
+            parents=True,
+
+            exist_ok=True
+        )
+
+
+        # =================================================
+        # SEND TO AI PROVIDER
+        # =================================================
+
+        result = self.provider.generate_video(
+
             image_path=image_path,
+
             output_path=output_path,
+
             prompt=prompt,
+
             mode=mode,
+
             duration=duration
         )
+
+
+        # =================================================
+        # CHECK RESULT
+        # =================================================
+
+        if result is None:
+
+            raise RuntimeError(
+                "AI provider did not return a video."
+            )
+
+
+        if not result.exists():
+
+            raise RuntimeError(
+                "Generated video file was not found."
+            )
+
+
+        if result.stat().st_size <= 0:
+
+            raise RuntimeError(
+                "Generated video file is empty."
+            )
+
+
+        return result
