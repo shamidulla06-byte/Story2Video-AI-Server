@@ -1,28 +1,18 @@
 from pathlib import Path
 from typing import Optional
+import os
 
 from config import settings
 
 
 class AIProvider:
-    """
-    Story2Video AI Provider
-
-    এই class বিভিন্ন AI Video Provider-এর
-    configuration এবং connection পরিচালনা করে।
-
-    বর্তমানে supported architecture:
-
-    - local
-    - huggingface
-    - gpu_server
-
-    ভবিষ্যতে নতুন provider সহজে যোগ করা যাবে।
-    """
 
     def __init__(self):
 
         self.provider_name = settings.AI_PROVIDER
+
+        self.fal_key = settings.FAL_KEY
+        self.fal_model = settings.FAL_MODEL
 
         self.gpu_server_url = (
             settings.GPU_SERVER_URL
@@ -36,20 +26,23 @@ class AIProvider:
             settings.HUGGINGFACE_API_KEY
         )
 
-    # -----------------------------------------
+    # =========================================
     # CONNECTION CHECK
-    # -----------------------------------------
+    # =========================================
 
     def is_connected(self) -> bool:
 
+        if self.provider_name == "fal":
+
+            return bool(self.fal_key)
+
         if self.provider_name == "local":
+
             return False
 
         if self.provider_name == "gpu_server":
 
-            return bool(
-                self.gpu_server_url
-            )
+            return bool(self.gpu_server_url)
 
         if self.provider_name == "huggingface":
 
@@ -59,15 +52,22 @@ class AIProvider:
 
         return False
 
-    # -----------------------------------------
+    # =========================================
     # PROVIDER STATUS
-    # -----------------------------------------
+    # =========================================
 
     def status(self) -> dict:
 
         return {
             "provider": self.provider_name,
+
             "connected": self.is_connected(),
+
+            "fal_configured": bool(
+                self.fal_key
+            ),
+
+            "fal_model": self.fal_model,
 
             "gpu_server_configured": bool(
                 self.gpu_server_url
@@ -78,15 +78,16 @@ class AIProvider:
             ),
 
             "available_providers": [
+                "fal",
                 "local",
                 "huggingface",
                 "gpu_server"
             ]
         }
 
-    # -----------------------------------------
+    # =========================================
     # VIDEO GENERATION
-    # -----------------------------------------
+    # =========================================
 
     def generate_video(
         self,
@@ -103,11 +104,37 @@ class AIProvider:
                 "Input image was not found."
             )
 
+        # =====================================
+        # FAL PROVIDER
+        # =====================================
+
+        if self.provider_name == "fal":
+
+            if not self.fal_key:
+
+                raise RuntimeError(
+                    "FAL_KEY is not configured."
+                )
+
+            raise RuntimeError(
+                "FAL provider connection is ready, "
+                "but the API request connector "
+                "will be added in the next step."
+            )
+
+        # =====================================
+        # LOCAL
+        # =====================================
+
         if self.provider_name == "local":
 
             raise RuntimeError(
                 "No AI provider is connected yet."
             )
+
+        # =====================================
+        # HUGGINGFACE
+        # =====================================
 
         if self.provider_name == "huggingface":
 
@@ -115,6 +142,10 @@ class AIProvider:
                 "Hugging Face provider connector "
                 "is not implemented yet."
             )
+
+        # =====================================
+        # GPU SERVER
+        # =====================================
 
         if self.provider_name == "gpu_server":
 
