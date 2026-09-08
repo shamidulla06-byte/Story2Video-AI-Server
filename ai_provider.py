@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Optional
-import os
+import shutil
+import requests
 
 from config import settings
 
@@ -33,19 +34,15 @@ class AIProvider:
     def is_connected(self) -> bool:
 
         if self.provider_name == "fal":
-
             return bool(self.fal_key)
 
         if self.provider_name == "local":
-
             return False
 
         if self.provider_name == "gpu_server":
-
             return bool(self.gpu_server_url)
 
         if self.provider_name == "huggingface":
-
             return bool(
                 self.huggingface_api_key
             )
@@ -86,6 +83,65 @@ class AIProvider:
         }
 
     # =========================================
+    # FAL IMAGE UPLOAD
+    # =========================================
+
+    def upload_image_to_fal(
+        self,
+        image_path: Path
+    ) -> str:
+
+        try:
+
+            import fal_client
+
+        except ImportError:
+
+            raise RuntimeError(
+                "fal-client package is not installed."
+            )
+
+        uploaded_url = (
+            fal_client.upload_file(
+                str(image_path)
+            )
+        )
+
+        return uploaded_url
+
+    # =========================================
+    # DOWNLOAD VIDEO
+    # =========================================
+
+    def download_video(
+        self,
+        video_url: str,
+        output_path: Path
+    ) -> Path:
+
+        output_path.parent.mkdir(
+            parents=True,
+            exist_ok=True
+        )
+
+        response = requests.get(
+            video_url,
+            stream=True,
+            timeout=300
+        )
+
+        response.raise_for_status()
+
+        with output_path.open("wb") as video_file:
+
+            shutil.copyfileobj(
+                response.raw,
+                video_file
+            )
+
+        return output_path
+
+    # =========================================
     # VIDEO GENERATION
     # =========================================
 
@@ -116,10 +172,82 @@ class AIProvider:
                     "FAL_KEY is not configured."
                 )
 
-            raise RuntimeError(
-                "FAL provider connection is ready, "
-                "but the API request connector "
-                "will be added in the next step."
+            try:
+
+                import fal_client
+
+            except ImportError:
+
+                raise RuntimeError(
+                    "fal-client package is not installed."
+                )
+
+            # ---------------------------------
+            # UPLOAD IMAGE TO FAL STORAGE
+            # ---------------------------------
+
+            image_url = (
+                self.upload_image_to_fal(
+                    image_path
+                )
+            )
+
+            # ---------------------------------
+            # BUILD VIDEO PROMPT
+            # ---------------------------------
+
+            final_prompt = (
+                f"{prompt}\n\n"
+                f"Animation mode: {mode}. "
+                "Maintain character identity and "
+                "visual consistency. Natural motion. "
+                "Cinematic quality."
+            )
+
+            # ---------------------------------
+            # CALL FAL MODEL
+            # ---------------------------------
+
+            result = fal_client.subscribe(
+                self.fal_model,
+                arguments={
+                    "prompt": final_prompt,
+                    "image_url": image_url,
+                    "duration": duration
+                }
+            )
+
+            # ---------------------------------
+            # GET VIDEO URL
+            # ---------------------------------
+
+            video_data = result.get(
+                "video"
+            )
+
+            if not video_data:
+
+                raise RuntimeError(
+                    "FAL did not return video data."
+                )
+
+            video_url = video_data.get(
+                "url"
+            )
+
+            if not video_url:
+
+                raise RuntimeError(
+                    "FAL did not return a video URL."
+                )
+
+            # ---------------------------------
+            # DOWNLOAD FINAL VIDEO
+            # ---------------------------------
+
+            return self.download_video(
+                video_url,
+                output_path
             )
 
         # =====================================
