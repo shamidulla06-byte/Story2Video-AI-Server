@@ -2,9 +2,16 @@ import os
 
 
 class Settings:
+    """
+    Story2Video AI Server Configuration
+    """
+
+    # =========================================
+    # APPLICATION
+    # =========================================
 
     APP_NAME = "Story2Video AI Server"
-    APP_VERSION = "2.3.0"
+    APP_VERSION = "2.4.0"
 
     # =========================================
     # AI PROVIDER
@@ -16,7 +23,7 @@ class Settings:
     )
 
     # =========================================
-    # FAL AI
+    # FAL AI CONFIGURATION
     # =========================================
 
     FAL_KEY = os.getenv(
@@ -26,7 +33,7 @@ class Settings:
 
     FAL_MODEL = os.getenv(
         "FAL_MODEL",
-        "fal-ai/wan-pro/image-to-video"
+        "wan/v2.6/image-to-video"
     )
 
     # =========================================
