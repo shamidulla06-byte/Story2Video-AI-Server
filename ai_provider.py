@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import Optional
 import shutil
@@ -9,6 +10,10 @@ from config import settings
 class AIProvider:
 
     def __init__(self):
+
+        # =========================================
+        # PROVIDER SETTINGS
+        # =========================================
 
         self.provider_name = settings.AI_PROVIDER
 
@@ -27,6 +32,15 @@ class AIProvider:
             settings.HUGGINGFACE_API_KEY
         )
 
+        # =========================================
+        # FAL ENVIRONMENT KEY
+        # =========================================
+
+        # Ensure fal-client can read the API key
+        if self.fal_key:
+
+            os.environ["FAL_KEY"] = self.fal_key
+
     # =========================================
     # CONNECTION CHECK
     # =========================================
@@ -34,15 +48,19 @@ class AIProvider:
     def is_connected(self) -> bool:
 
         if self.provider_name == "fal":
+
             return bool(self.fal_key)
 
         if self.provider_name == "local":
+
             return False
 
         if self.provider_name == "gpu_server":
+
             return bool(self.gpu_server_url)
 
         if self.provider_name == "huggingface":
+
             return bool(
                 self.huggingface_api_key
             )
@@ -56,6 +74,7 @@ class AIProvider:
     def status(self) -> dict:
 
         return {
+
             "provider": self.provider_name,
 
             "connected": self.is_connected(),
@@ -75,9 +94,13 @@ class AIProvider:
             ),
 
             "available_providers": [
+
                 "fal",
+
                 "local",
+
                 "huggingface",
+
                 "gpu_server"
             ]
         }
@@ -91,6 +114,18 @@ class AIProvider:
         image_path: Path
     ) -> str:
 
+        if not self.fal_key:
+
+            raise RuntimeError(
+                "FAL_KEY is not configured."
+            )
+
+        # Make absolutely sure the environment
+        # variable is available before importing
+        # and using fal-client.
+
+        os.environ["FAL_KEY"] = self.fal_key
+
         try:
 
             import fal_client
@@ -101,13 +136,22 @@ class AIProvider:
                 "fal-client package is not installed."
             )
 
-        uploaded_url = (
-            fal_client.upload_file(
-                str(image_path)
-            )
-        )
+        try:
 
-        return uploaded_url
+            uploaded_url = (
+                fal_client.upload_file(
+                    str(image_path)
+                )
+            )
+
+            return uploaded_url
+
+        except Exception as error:
+
+            raise RuntimeError(
+                "FAL image upload failed: "
+                f"{str(error)}"
+            )
 
     # =========================================
     # DOWNLOAD VIDEO
@@ -132,7 +176,9 @@ class AIProvider:
 
         response.raise_for_status()
 
-        with output_path.open("wb") as video_file:
+        with output_path.open(
+            "wb"
+        ) as video_file:
 
             shutil.copyfileobj(
                 response.raw,
@@ -172,6 +218,9 @@ class AIProvider:
                     "FAL_KEY is not configured."
                 )
 
+            # Ensure key is available
+            os.environ["FAL_KEY"] = self.fal_key
+
             try:
 
                 import fal_client
@@ -183,7 +232,7 @@ class AIProvider:
                 )
 
             # ---------------------------------
-            # UPLOAD IMAGE TO FAL STORAGE
+            # UPLOAD IMAGE
             # ---------------------------------
 
             image_url = (
@@ -193,32 +242,42 @@ class AIProvider:
             )
 
             # ---------------------------------
-            # BUILD VIDEO PROMPT
+            # BUILD PROMPT
             # ---------------------------------
 
             final_prompt = (
                 f"{prompt}\n\n"
                 f"Animation mode: {mode}. "
                 "Maintain character identity and "
-                "visual consistency. Natural motion. "
-                "Cinematic quality."
+                "visual consistency. "
+                "Natural realistic motion. "
+                "High quality cinematic animation."
             )
 
             # ---------------------------------
             # CALL FAL MODEL
             # ---------------------------------
 
-            result = fal_client.subscribe(
-                self.fal_model,
-                arguments={
-                    "prompt": final_prompt,
-                    "image_url": image_url,
-                    "duration": duration
-                }
-            )
+            try:
+
+                result = fal_client.subscribe(
+                    self.fal_model,
+                    arguments={
+                        "prompt": final_prompt,
+                        "image_url": image_url,
+                        "duration": duration
+                    }
+                )
+
+            except Exception as error:
+
+                raise RuntimeError(
+                    "FAL video generation failed: "
+                    f"{str(error)}"
+                )
 
             # ---------------------------------
-            # GET VIDEO URL
+            # GET VIDEO DATA
             # ---------------------------------
 
             video_data = result.get(
@@ -242,7 +301,7 @@ class AIProvider:
                 )
 
             # ---------------------------------
-            # DOWNLOAD FINAL VIDEO
+            # DOWNLOAD VIDEO
             # ---------------------------------
 
             return self.download_video(
@@ -251,17 +310,17 @@ class AIProvider:
             )
 
         # =====================================
-        # LOCAL
+        # LOCAL PROVIDER
         # =====================================
 
         if self.provider_name == "local":
 
             raise RuntimeError(
-                "No AI provider is connected yet."
+                "No local AI provider is connected."
             )
 
         # =====================================
-        # HUGGINGFACE
+        # HUGGING FACE
         # =====================================
 
         if self.provider_name == "huggingface":
@@ -282,10 +341,18 @@ class AIProvider:
                 "is not implemented yet."
             )
 
+        # =====================================
+        # UNKNOWN PROVIDER
+        # =====================================
+
         raise RuntimeError(
             f"Unknown AI provider: "
             f"{self.provider_name}"
         )
 
+
+# =========================================
+# GLOBAL AI PROVIDER
+# =========================================
 
 ai_provider = AIProvider()
