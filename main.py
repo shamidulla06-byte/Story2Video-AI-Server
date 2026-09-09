@@ -8,7 +8,6 @@ from fastapi import (
 )
 
 from fastapi.responses import JSONResponse
-
 from fastapi.staticfiles import StaticFiles
 
 from pathlib import Path
@@ -28,7 +27,7 @@ from continuity_engine import continuity_engine
 
 app = FastAPI(
     title="Story2Video AI Server",
-    version="2.4.0"
+    version="2.5.0"
 )
 
 
@@ -57,7 +56,7 @@ OUTPUT_DIR.mkdir(
 
 
 # =====================================================
-# STATIC VIDEO FILES
+# PUBLIC STORAGE
 # =====================================================
 
 app.mount(
@@ -75,23 +74,16 @@ ai_engine = AIEngine()
 
 
 # =====================================================
-# ALLOWED IMAGE TYPES
+# IMAGE TYPES
 # =====================================================
 
 ALLOWED_IMAGE_TYPES = {
+
     "image/jpeg",
+
     "image/png",
+
     "image/webp"
-}
-
-
-# =====================================================
-# SUPPORTED DURATIONS
-# =====================================================
-
-SUPPORTED_DURATIONS = {
-    6,
-    10
 }
 
 
@@ -108,12 +100,12 @@ def root():
 
         "status": "online",
 
-        "version": "2.4.0"
+        "version": "2.5.0"
     }
 
 
 # =====================================================
-# HEALTH CHECK
+# HEALTH
 # =====================================================
 
 @app.get("/health")
@@ -174,25 +166,6 @@ def engine_status():
 
 
 # =====================================================
-# GET JOB STATUS
-# =====================================================
-
-@app.get("/v1/jobs/{job_id}")
-def get_job(job_id: str):
-
-    job = job_manager.get_job(job_id)
-
-    if job is None:
-
-        raise HTTPException(
-            status_code=404,
-            detail="Job not found."
-        )
-
-    return job
-
-
-# =====================================================
 # STORY ANALYSIS
 # =====================================================
 
@@ -225,7 +198,7 @@ def analyze_story(
 
 
 # =====================================================
-# STORY → SCENE PLAN
+# STORY PLAN
 # =====================================================
 
 @app.post("/v1/story/plan")
@@ -267,7 +240,7 @@ def plan_story(
 
 
 # =====================================================
-# STORY → FULL PLAN
+# FULL STORY PLAN
 # =====================================================
 
 @app.post("/v1/story/full-plan")
@@ -277,20 +250,11 @@ def create_full_story_plan(
 
     try:
 
-        # ---------------------------------------------
-        # STEP 1
-        # ---------------------------------------------
-
         story_analysis = (
             story_intelligence.analyze_story(
                 story
             )
         )
-
-
-        # ---------------------------------------------
-        # STEP 2
-        # ---------------------------------------------
 
         scene_plan = (
             scene_planner.create_scene_plan(
@@ -298,18 +262,12 @@ def create_full_story_plan(
             )
         )
 
-
-        # ---------------------------------------------
-        # STEP 3
-        # ---------------------------------------------
-
         continuity_plan = (
             continuity_engine.build_continuity(
                 story_analysis,
                 scene_plan
             )
         )
-
 
         return {
 
@@ -334,66 +292,83 @@ def create_full_story_plan(
 
 
 # =====================================================
-# BACKGROUND VIDEO PROCESS
+# GET JOB STATUS
+# =====================================================
+
+@app.get("/v1/jobs/{job_id}")
+def get_job(job_id: str):
+
+    job = job_manager.get_job(
+        job_id
+    )
+
+    if job is None:
+
+        raise HTTPException(
+            status_code=404,
+            detail="Job not found."
+        )
+
+    return job
+
+
+# =====================================================
+# PUBLIC IMAGE URL
+# =====================================================
+
+def get_public_base_url() -> str:
+
+    import os
+
+    server_url = os.getenv(
+        "SERVER_URL",
+        ""
+    ).strip()
+
+    if not server_url:
+
+        raise RuntimeError(
+            "SERVER_URL is not configured. "
+            "Add your public Render URL to "
+            "Environment Variables."
+        )
+
+    return server_url.rstrip("/")
+
+
+# =====================================================
+# BACKGROUND VIDEO PROCESSING
 # =====================================================
 
 def process_video_job(
-
     job_id: str,
-
     input_file: Path,
-
+    image_public_url: str,
     prompt: str,
-
     mode: str,
-
     duration: int
-
 ):
 
     try:
-
-        # ---------------------------------------------
-        # JOB START
-        # ---------------------------------------------
 
         job_manager.update_status(
             job_id,
             "processing"
         )
 
-
-        # ---------------------------------------------
-        # OUTPUT FILE
-        # ---------------------------------------------
-
         output_file = (
             OUTPUT_DIR /
             f"{job_id}.mp4"
         )
 
-
-        # ---------------------------------------------
-        # GENERATE AI VIDEO
-        # ---------------------------------------------
-
         result = ai_engine.generate(
-
             image_path=input_file,
-
+            image_url=image_public_url,
             output_path=output_file,
-
             prompt=prompt,
-
             mode=mode,
-
             duration=duration
         )
-
-
-        # ---------------------------------------------
-        # CHECK RESULT
-        # ---------------------------------------------
 
         if result is None:
 
@@ -401,63 +376,27 @@ def process_video_job(
                 "AI provider did not return a video."
             )
 
-
-        if not result.exists():
-
-            raise RuntimeError(
-                "Generated video file was not found."
-            )
-
-
-        if result.stat().st_size <= 0:
-
-            raise RuntimeError(
-                "Generated video file is empty."
-            )
-
-
-        # ---------------------------------------------
-        # VIDEO URL
-        # ---------------------------------------------
-
         video_url = (
             f"/storage/outputs/{job_id}.mp4"
         )
 
-
-        # ---------------------------------------------
-        # JOB COMPLETED
-        # ---------------------------------------------
-
         job_manager.update_status(
-
             job_id,
-
             "completed",
-
             video_url=video_url
         )
 
-
     except Exception as error:
 
-
-        # ---------------------------------------------
-        # JOB FAILED
-        # ---------------------------------------------
-
         job_manager.update_status(
-
             job_id,
-
             "failed",
-
             error=str(error)
         )
 
 
 # =====================================================
-# IMAGE → AI VIDEO
+# IMAGE → VIDEO
 # =====================================================
 
 @app.post("/v1/image-to-video")
@@ -472,47 +411,26 @@ async def image_to_video(
     mode: str = Form("AI Motion"),
 
     duration: int = Form(6)
-
 ):
 
-
-    # =================================================
+    # =============================================
     # VALIDATE IMAGE
-    # =================================================
+    # =============================================
 
     if image.content_type not in ALLOWED_IMAGE_TYPES:
 
         raise HTTPException(
-
             status_code=400,
-
             detail=(
-                "Only JPEG, PNG and WebP images "
-                "are supported."
+                "Only JPEG, PNG and WebP "
+                "images are supported."
             )
         )
 
 
-    # =================================================
-    # VALIDATE DURATION
-    # =================================================
-
-    if duration not in SUPPORTED_DURATIONS:
-
-        raise HTTPException(
-
-            status_code=400,
-
-            detail=(
-                "Supported durations are "
-                "6 or 10 seconds."
-            )
-        )
-
-
-    # =================================================
+    # =============================================
     # VALIDATE MODE
-    # =================================================
+    # =============================================
 
     allowed_modes = {
 
@@ -520,75 +438,73 @@ async def image_to_video(
 
         "Face Motion",
 
-        "Cinematic Motion",
-
-        "Natural Camera"
+        "Cinematic Motion"
     }
-
 
     if mode not in allowed_modes:
 
         raise HTTPException(
-
             status_code=400,
-
-            detail="Unsupported animation mode."
+            detail=(
+                "Unsupported animation mode."
+            )
         )
 
 
-    # =================================================
-    # CREATE JOB
-    # =================================================
+    # =============================================
+    # VALIDATE DURATION
+    # =============================================
 
-    job_id = str(
-        uuid4()
-    )
+    if duration not in [6, 10]:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Only 6 or 10 second videos "
+                "are supported."
+            )
+        )
+
+
+    # =============================================
+    # CREATE JOB
+    # =============================================
+
+    job_id = str(uuid4())
 
 
     job_manager.create_job(
-
         job_id=job_id,
-
         prompt=prompt,
-
         mode=mode,
-
         duration=duration
     )
 
 
-    # =================================================
-    # IMAGE EXTENSION
-    # =================================================
+    # =============================================
+    # DETERMINE EXTENSION
+    # =============================================
 
     extension = ".jpg"
-
 
     if image.content_type == "image/png":
 
         extension = ".png"
-
 
     elif image.content_type == "image/webp":
 
         extension = ".webp"
 
 
-    # =================================================
-    # INPUT FILE
-    # =================================================
+    # =============================================
+    # SAVE IMAGE
+    # =============================================
 
     input_file = (
-
         UPLOAD_DIR /
-
         f"{job_id}{extension}"
     )
 
-
-    # =================================================
-    # SAVE IMAGE
-    # =================================================
 
     try:
 
@@ -597,44 +513,63 @@ async def image_to_video(
         ) as buffer:
 
             shutil.copyfileobj(
-
                 image.file,
-
                 buffer
             )
 
-
     except Exception as error:
 
-
         job_manager.update_status(
-
             job_id,
-
             "failed",
-
             error=str(error)
         )
 
-
         raise HTTPException(
-
             status_code=500,
-
             detail=(
                 f"Could not save image: {error}"
             )
         )
 
 
-    finally:
+    # =============================================
+    # CREATE PUBLIC IMAGE URL
+    # =============================================
 
-        await image.close()
+    try:
+
+        public_base_url = (
+            get_public_base_url()
+        )
+
+    except RuntimeError as error:
+
+        job_manager.update_status(
+            job_id,
+            "failed",
+            error=str(error)
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(error)
+        )
 
 
-    # =================================================
-    # ADD BACKGROUND TASK
-    # =================================================
+    image_public_url = (
+
+        f"{public_base_url}"
+
+        f"/storage/uploads/"
+
+        f"{job_id}{extension}"
+    )
+
+
+    # =============================================
+    # ADD BACKGROUND JOB
+    # =============================================
 
     background_tasks.add_task(
 
@@ -644,6 +579,8 @@ async def image_to_video(
 
         input_file,
 
+        image_public_url,
+
         prompt,
 
         mode,
@@ -652,9 +589,9 @@ async def image_to_video(
     )
 
 
-    # =================================================
-    # RETURN JOB
-    # =================================================
+    # =============================================
+    # RESPONSE
+    # =============================================
 
     return JSONResponse(
 
@@ -666,10 +603,10 @@ async def image_to_video(
 
             "status": "queued",
 
-            "message":
-                "Video generation started.",
-
             "status_url":
-                f"/v1/jobs/{job_id}"
+                f"/v1/jobs/{job_id}",
+
+            "image_url":
+                image_public_url
         }
     )
