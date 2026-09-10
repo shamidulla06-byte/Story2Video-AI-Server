@@ -33,7 +33,8 @@ class AIEngine:
 
             "version": self.version,
 
-            "connected": provider_status["connected"],
+            "connected":
+                provider_status["connected"],
 
             "supported_durations": [
                 6,
@@ -52,7 +53,8 @@ class AIEngine:
 
             ],
 
-            "provider": provider_status
+            "provider":
+                provider_status
         }
 
 
@@ -72,13 +74,15 @@ class AIEngine:
 
         mode: str = "AI Motion",
 
-        duration: int = 6
+        duration: int = 6,
+
+        image_url: Optional[str] = None
 
     ) -> Optional[Path]:
 
 
         # =================================================
-        # CHECK INPUT IMAGE
+        # CHECK IMAGE
         # =================================================
 
         if not image_path.exists():
@@ -89,11 +93,21 @@ class AIEngine:
 
 
         # =================================================
+        # CHECK PUBLIC URL
+        # =================================================
+
+        if not image_url:
+
+            raise RuntimeError(
+                "Public image URL is missing."
+            )
+
+
+        # =================================================
         # CHECK DURATION
         # =================================================
 
         supported_durations = {
-
             6,
             10
         }
@@ -102,7 +116,6 @@ class AIEngine:
         if duration not in supported_durations:
 
             raise ValueError(
-
                 "Supported video durations are "
                 "6 or 10 seconds."
             )
@@ -131,7 +144,7 @@ class AIEngine:
 
 
         # =================================================
-        # CREATE OUTPUT DIRECTORY
+        # OUTPUT DIRECTORY
         # =================================================
 
         output_path.parent.mkdir(
@@ -143,7 +156,7 @@ class AIEngine:
 
 
         # =================================================
-        # SEND TO AI PROVIDER
+        # SEND TO PROVIDER
         # =================================================
 
         result = self.provider.generate_video(
@@ -156,7 +169,9 @@ class AIEngine:
 
             mode=mode,
 
-            duration=duration
+            duration=duration,
+
+            image_url=image_url
         )
 
 
