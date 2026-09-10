@@ -33,8 +33,7 @@ class AIEngine:
 
             "version": self.version,
 
-            "connected":
-                provider_status["connected"],
+            "connected": provider_status["connected"],
 
             "supported_durations": [
                 6,
@@ -44,17 +43,12 @@ class AIEngine:
             "default_duration": 6,
 
             "supported_modes": [
-
                 "AI Motion",
-
                 "Face Motion",
-
                 "Cinematic Motion"
-
             ],
 
-            "provider":
-                provider_status
+            "provider": provider_status
         }
 
 
@@ -82,7 +76,7 @@ class AIEngine:
 
 
         # =================================================
-        # CHECK IMAGE
+        # CHECK INPUT IMAGE
         # =================================================
 
         if not image_path.exists():
@@ -93,13 +87,20 @@ class AIEngine:
 
 
         # =================================================
-        # CHECK PUBLIC URL
+        # CHECK PUBLIC IMAGE URL
         # =================================================
 
         if not image_url:
 
-            raise RuntimeError(
+            raise ValueError(
                 "Public image URL is missing."
+            )
+
+
+        if not image_url.startswith("http"):
+
+            raise ValueError(
+                "Public image URL is invalid."
             )
 
 
@@ -144,7 +145,7 @@ class AIEngine:
 
 
         # =================================================
-        # OUTPUT DIRECTORY
+        # CREATE OUTPUT DIRECTORY
         # =================================================
 
         output_path.parent.mkdir(
@@ -156,7 +157,7 @@ class AIEngine:
 
 
         # =================================================
-        # SEND TO PROVIDER
+        # SEND TO AI PROVIDER
         # =================================================
 
         result = self.provider.generate_video(
