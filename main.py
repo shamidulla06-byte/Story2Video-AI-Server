@@ -4,31 +4,22 @@ from fastapi import (
     File,
     Form,
     HTTPException,
-    BackgroundTasks
+    BackgroundTasks,
+    Request
 )
+
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+
 from pathlib import Path
 from uuid import uuid4
 import shutil
-import traceback
-import logging
 
 from ai_engine import AIEngine
 from job_manager import job_manager
 from story_intelligence import story_intelligence
 from scene_planner import scene_planner
 from continuity_engine import continuity_engine
-
-
-# =====================================================
-# LOGGING
-# =====================================================
-
-logging.basicConfig(
-    level=logging.INFO
-)
-
-logger = logging.getLogger("story2video")
 
 
 # =====================================================
@@ -47,9 +38,12 @@ app = FastAPI(
 
 BASE_DIR = Path(__file__).resolve().parent
 
-UPLOAD_DIR = BASE_DIR / "storage" / "uploads"
+STORAGE_DIR = BASE_DIR / "storage"
 
-OUTPUT_DIR = BASE_DIR / "storage" / "outputs"
+UPLOAD_DIR = STORAGE_DIR / "uploads"
+
+OUTPUT_DIR = STORAGE_DIR / "outputs"
+
 
 UPLOAD_DIR.mkdir(
     parents=True,
@@ -59,6 +53,17 @@ UPLOAD_DIR.mkdir(
 OUTPUT_DIR.mkdir(
     parents=True,
     exist_ok=True
+)
+
+
+# =====================================================
+# PUBLIC STORAGE
+# =====================================================
+
+app.mount(
+    "/storage",
+    StaticFiles(directory=str(STORAGE_DIR)),
+    name="storage"
 )
 
 
@@ -75,7 +80,6 @@ ai_engine = AIEngine()
 
 ALLOWED_IMAGE_TYPES = {
     "image/jpeg",
-    "image/jpg",
     "image/png",
     "image/webp"
 }
@@ -96,13 +100,14 @@ def root():
 
 
 # =====================================================
-# HEALTH CHECK
+# HEALTH
 # =====================================================
 
 @app.get("/health")
 def health():
 
     return {
+
         "status": "healthy",
 
         "ai_engine": ai_engine.status(),
@@ -128,7 +133,7 @@ def health():
 
 
 # =====================================================
-# AI ENGINE STATUS
+# ENGINE STATUS
 # =====================================================
 
 @app.get("/v1/engine/status")
@@ -159,11 +164,7 @@ def analyze_story(
             "analysis": analysis
         }
 
-    except Exception as error:
-
-        logger.exception(
-            "Story analysis failed"
-        )
+    except ValueError as error:
 
         raise HTTPException(
             status_code=400,
@@ -200,11 +201,7 @@ def plan_story(
             "scene_plan": scene_plan
         }
 
-    except Exception as error:
-
-        logger.exception(
-            "Story planning failed"
-        )
+    except ValueError as error:
 
         raise HTTPException(
             status_code=400,
@@ -249,11 +246,7 @@ def create_full_story_plan(
             "continuity_plan": continuity_plan
         }
 
-    except Exception as error:
-
-        logger.exception(
-            "Full story planning failed"
-        )
+    except ValueError as error:
 
         raise HTTPException(
             status_code=400,
@@ -262,7 +255,7 @@ def create_full_story_plan(
 
 
 # =====================================================
-# GET JOB STATUS
+# GET JOB
 # =====================================================
 
 @app.get("/v1/jobs/{job_id}")
@@ -270,9 +263,7 @@ def get_job(
     job_id: str
 ):
 
-    job = job_manager.get_job(
-        job_id
-    )
+    job = job_manager.get_job(job_id)
 
     if job is None:
 
@@ -285,22 +276,19 @@ def get_job(
 
 
 # =====================================================
-# BACKGROUND VIDEO PROCESSING
+# PROCESS VIDEO JOB
 # =====================================================
 
 def process_video_job(
     job_id: str,
     input_file: Path,
+    image_url: str,
     prompt: str,
     mode: str,
     duration: int
 ):
 
     try:
-
-        logger.info(
-            f"Starting video job: {job_id}"
-        )
 
         job_manager.update_status(
             job_id,
@@ -313,11 +301,18 @@ def process_video_job(
         )
 
         result = ai_engine.generate(
+
             image_path=input_file,
+
             output_path=output_file,
+
             prompt=prompt,
+
             mode=mode,
-            duration=duration
+
+            duration=duration,
+
+            image_url=image_url
         )
 
         if result is None:
@@ -326,267 +321,233 @@ def process_video_job(
                 "AI provider did not return a video."
             )
 
-        if not result.exists():
-
-            raise RuntimeError(
-                "Generated video file was not found."
-            )
-
-        if result.stat().st_size <= 0:
-
-            raise RuntimeError(
-                "Generated video file is empty."
-            )
-
         video_url = (
             f"/storage/outputs/{job_id}.mp4"
         )
 
         job_manager.update_status(
-            job_id,
-            "completed",
-            video_url=video_url
-        )
 
-        logger.info(
-            f"Video job completed: {job_id}"
+            job_id,
+
+            "completed",
+
+            video_url=video_url
         )
 
     except Exception as error:
 
-        logger.exception(
-            f"Video job failed: {job_id}"
-        )
-
         job_manager.update_status(
+
             job_id,
+
             "failed",
+
             error=str(error)
         )
 
 
 # =====================================================
-# IMAGE → VIDEO
+# IMAGE TO VIDEO
 # =====================================================
 
 @app.post("/v1/image-to-video")
 async def image_to_video(
+
+    request: Request,
+
     background_tasks: BackgroundTasks,
+
     image: UploadFile = File(...),
+
     prompt: str = Form(""),
+
     mode: str = Form("AI Motion"),
+
     duration: int = Form(6)
 ):
 
+
+    # =================================================
+    # VALIDATE IMAGE
+    # =================================================
+
+    if image.content_type not in ALLOWED_IMAGE_TYPES:
+
+        raise HTTPException(
+
+            status_code=400,
+
+            detail=(
+                "Only JPEG, PNG and WebP images "
+                "are supported."
+            )
+        )
+
+
+    # =================================================
+    # VALIDATE DURATION
+    # =================================================
+
+    if duration not in [6, 10]:
+
+        raise HTTPException(
+
+            status_code=400,
+
+            detail=(
+                "Supported durations are "
+                "6 or 10 seconds."
+            )
+        )
+
+
+    # =================================================
+    # CREATE JOB
+    # =================================================
+
+    job_id = str(uuid4())
+
+
+    job_manager.create_job(
+
+        job_id=job_id,
+
+        prompt=prompt,
+
+        mode=mode,
+
+        duration=duration
+    )
+
+
+    # =================================================
+    # FILE EXTENSION
+    # =================================================
+
+    extension = ".jpg"
+
+
+    if image.content_type == "image/png":
+
+        extension = ".png"
+
+
+    elif image.content_type == "image/webp":
+
+        extension = ".webp"
+
+
+    # =================================================
+    # SAVE IMAGE
+    # =================================================
+
+    input_file = (
+
+        UPLOAD_DIR /
+
+        f"{job_id}{extension}"
+    )
+
+
     try:
 
-        logger.info(
-            "New image-to-video request received"
-        )
+        with input_file.open(
+            "wb"
+        ) as buffer:
 
-        logger.info(
-            f"Content type: {image.content_type}"
-        )
+            shutil.copyfileobj(
 
-        logger.info(
-            f"Filename: {image.filename}"
-        )
+                image.file,
 
-        logger.info(
-            f"Mode: {mode}"
-        )
-
-        logger.info(
-            f"Duration: {duration}"
-        )
-
-        # =============================================
-        # VALIDATE IMAGE
-        # =============================================
-
-        if image.content_type not in ALLOWED_IMAGE_TYPES:
-
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Only JPEG, PNG and WebP images "
-                    "are supported."
-                )
+                buffer
             )
 
-        # =============================================
-        # VALIDATE DURATION
-        # =============================================
-
-        if duration not in [6, 10]:
-
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Supported durations are 6 or 10 seconds."
-                )
-            )
-
-        # =============================================
-        # CREATE JOB
-        # =============================================
-
-        job_id = str(
-            uuid4()
-        )
-
-        logger.info(
-            f"Creating job: {job_id}"
-        )
-
-        job_manager.create_job(
-            job_id=job_id,
-            prompt=prompt,
-            mode=mode,
-            duration=duration
-        )
-
-        # =============================================
-        # DETERMINE EXTENSION
-        # =============================================
-
-        extension = ".jpg"
-
-        if image.content_type == "image/png":
-
-            extension = ".png"
-
-        elif image.content_type == "image/webp":
-
-            extension = ".webp"
-
-        # =============================================
-        # SAVE IMAGE
-        # =============================================
-
-        input_file = (
-            UPLOAD_DIR /
-            f"{job_id}{extension}"
-        )
-
-        logger.info(
-            f"Saving uploaded image: {input_file}"
-        )
-
-        try:
-
-            with input_file.open(
-                "wb"
-            ) as buffer:
-
-                shutil.copyfileobj(
-                    image.file,
-                    buffer
-                )
-
-            if not input_file.exists():
-
-                raise RuntimeError(
-                    "Uploaded image file was not created."
-                )
-
-            if input_file.stat().st_size <= 0:
-
-                raise RuntimeError(
-                    "Uploaded image file is empty."
-                )
-
-            logger.info(
-                "Image uploaded successfully. "
-                f"Size: {input_file.stat().st_size} bytes"
-            )
-
-        except Exception as error:
-
-            logger.exception(
-                "Image saving failed"
-            )
-
-            job_manager.update_status(
-                job_id,
-                "failed",
-                error=str(error)
-            )
-
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    f"Could not save image: {error}"
-                )
-            )
-
-        finally:
-
-            try:
-
-                await image.close()
-
-            except Exception:
-
-                pass
-
-        # =============================================
-        # ADD BACKGROUND JOB
-        # =============================================
-
-        logger.info(
-            f"Adding background task: {job_id}"
-        )
-
-        background_tasks.add_task(
-            process_video_job,
-            job_id,
-            input_file,
-            prompt,
-            mode,
-            duration
-        )
-
-        # =============================================
-        # RESPONSE
-        # =============================================
-
-        return JSONResponse(
-            status_code=200,
-            content={
-                "success": True,
-
-                "job_id": job_id,
-
-                "status": "queued",
-
-                "message": (
-                    "Video job added successfully."
-                ),
-
-                "status_url": (
-                    f"/v1/jobs/{job_id}"
-                )
-            }
-        )
-
-    except HTTPException:
-
-        raise
 
     except Exception as error:
 
-        logger.error(
-            "IMAGE-TO-VIDEO REQUEST FAILED"
+        job_manager.update_status(
+
+            job_id,
+
+            "failed",
+
+            error=str(error)
         )
 
-        logger.error(
-            traceback.format_exc()
-        )
 
         raise HTTPException(
+
             status_code=500,
+
             detail=(
-                f"Server error: {str(error)}"
+                f"Could not save image: {error}"
             )
         )
+
+
+    # =================================================
+    # CREATE PUBLIC IMAGE URL
+    # =================================================
+
+    base_url = str(
+        request.base_url
+    ).rstrip("/")
+
+
+    image_url = (
+
+        f"{base_url}"
+
+        f"/storage/uploads/"
+
+        f"{job_id}{extension}"
+    )
+
+
+    # =================================================
+    # START BACKGROUND JOB
+    # =================================================
+
+    background_tasks.add_task(
+
+        process_video_job,
+
+        job_id,
+
+        input_file,
+
+        image_url,
+
+        prompt,
+
+        mode,
+
+        duration
+    )
+
+
+    # =================================================
+    # RESPONSE
+    # =================================================
+
+    return JSONResponse(
+
+        content={
+
+            "success": True,
+
+            "job_id": job_id,
+
+            "status": "queued",
+
+            "image_url": image_url,
+
+            "message":
+
+                "Video job added to queue.",
+
+            "status_url":
+
+                f"/v1/jobs/{job_id}"
+        }
+    )
